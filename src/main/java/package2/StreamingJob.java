@@ -18,9 +18,9 @@
 
 package package2;
 
-import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.common.functions.MapFunction;
-import org.apache.flink.api.common.functions.ReduceFunction;
+import org.apache.flink.api.common.functions.RichMapFunction;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
@@ -39,8 +39,6 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 public class StreamingJob {
 
 	public static void main(String[] args) throws Exception {
-		final String inputPath = "Data/text1.txt";
-
 		// set up the streaming execution environment
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
@@ -63,27 +61,32 @@ public class StreamingJob {
 		 * https://flink.apache.org/docs/latest/apis/streaming/index.html
 		 *
 		 */
-		DataStream<Integer[]> A = env.fromElements(Matrices.A);
+		DataStream<Tuple2<Integer,Integer[]>> A = env.fromElements(Matrices.A);
 		Integer[][] B = Matrices.B;
 
-		DataStream<String> result = A
-			// Each row in A
-			.map(new MapFunction<Integer[], String>() {
-				@Override
-				public String map(Integer[] s) throws Exception {
-					Integer[] vector = new Integer[s.length];
+		DataStream<Tuple2<Integer,String>> result = A
+				.keyBy(value -> value.f0)
+				// Each row in A
+				.map(new MapFunction<Tuple2<Integer,Integer[]>, Tuple2<Integer,String>>() {
+					@Override
+					public Tuple2<Integer,String> map(Tuple2<Integer,Integer[]> A_row) throws Exception {
+						Integer[] vector = new Integer[A_row.f1.length];
 
-					for (int j = 0; j < B.length; j++) {
-						Integer sum = 0;
-						for (int k = 0; k < B[j].length; k++) {
-							sum += s[k] * B[k][j];
+						for (int j = 0; j < B.length; j++) {
+							Integer sum = 0;
+							for (int k = 0; k < B[j].length; k++) {
+								sum += A_row.f1[k] * B[k][j];
+							}
+							vector[j] = sum;
 						}
-						vector[j] = sum;
-					}
 
-					return vector[0] + " " + vector[1] + " " + vector[2];
-				}
-			});
+						String res = "";
+						for (Integer val : vector) {
+							res += val + " ";
+						}
+						return new Tuple2<>(A_row.f0, res);
+					}
+				});
 
 		result.print();
 
