@@ -19,11 +19,10 @@
 package package2;
 
 import org.apache.flink.api.common.functions.FlatMapFunction;
+import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.functions.ReduceFunction;
-import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.util.Collector;
 
 /**
  * Skeleton for a Flink Streaming Job.
@@ -64,30 +63,31 @@ public class StreamingJob {
 		 * https://flink.apache.org/docs/latest/apis/streaming/index.html
 		 *
 		 */
-		DataStream<String> text = env.readTextFile(inputPath);
+		DataStream<Integer[]> A = env.fromElements(Matrices.A);
+		Integer[][] B = Matrices.B;
 
-		DataStream<Tuple2<String, Integer>> counts =
-				// Split up lines in pairs/tuples (word,1)
-				text.flatMap(new Tokenizer())
-						.keyBy(value -> value.f0)
-						// Group and sum the words together
-						.sum(1);
-		counts.print();
+		DataStream<String> result = A
+			// Each row in A
+			.map(new MapFunction<Integer[], String>() {
+				@Override
+				public String map(Integer[] s) throws Exception {
+					Integer[] vector = new Integer[s.length];
+
+					for (int j = 0; j < B.length; j++) {
+						Integer sum = 0;
+						for (int k = 0; k < B[j].length; k++) {
+							sum += s[k] * B[k][j];
+						}
+						vector[j] = sum;
+					}
+
+					return vector[0] + " " + vector[1] + " " + vector[2];
+				}
+			});
+
+		result.print();
 
 		// execute program
-		env.execute("Word Count Parallelised");
-	}
-
-	public static class Tokenizer implements FlatMapFunction<String, Tuple2<String, Integer>> {
-		@Override
-		public void flatMap(String value, Collector<Tuple2<String, Integer>> out) {
-			String[] tokens = value.toLowerCase().split("\\W+");
-
-			for (String token : tokens) {
-				if (token.length() > 0) {
-					out.collect(new Tuple2<String, Integer>(token, 1));
-				}
-			}
-		}
+		env.execute("Matrix Multiply");
 	}
 }
