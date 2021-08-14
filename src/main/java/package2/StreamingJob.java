@@ -20,13 +20,13 @@ package package2;
 
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.serialization.SimpleStringEncoder;
-import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.filesystem.StreamingFileSink;
 import org.apache.flink.streaming.api.functions.sink.filesystem.rollingpolicies.DefaultRollingPolicy;
 
+import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -42,8 +42,20 @@ import java.util.concurrent.TimeUnit;
  * method, change the respective entry in the POM.xml file (simply search for 'mainClass').
  */
 public class StreamingJob {
+	public static int N = 2000;
+	public static Random rng = new Random(42);
 
 	public static void main(String[] args) throws Exception {
+		int[][] A = new int[N][N];
+		int[][] B = new int[N][N];
+
+		for (int i = 0; i < N; i++) {
+			for (int j = 0; j < N; j++) {
+				A[i][j] = rng.nextInt();
+				B[i][j] = rng.nextInt();
+			}
+		}
+
 		// set up the streaming execution environment
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
@@ -71,39 +83,37 @@ public class StreamingJob {
 		//DataStream<Tuple2<Integer,Integer[]>> A = env.fromElements(Matrices.A);
 		//Integer[][] B = Matrices.B;
 
-		DataStream<Tuple2<Integer,Integer[]>> A = env.fromElements(MatrixA.matrix); // Stream of read data
+		//DataStream<Tuple2<Integer,Integer[]>> A = env.fromElements(MatrixA.matrix); // Stream of read data
+		//Tuple2<Integer,Integer[]>[] B = MatrixB.matrix; // Pre computed data
 
-		Tuple2<Integer,Integer[]>[] B = MatrixB.matrix; // Pre computed data
+		DataStream<int[]> A_str = env.fromElements(A); // Stream of read data
 
-		DataStream<Tuple2<Integer,Integer[]>> arr = A
-				.keyBy(value -> value.f0)
+		DataStream<Integer[]> arr = A_str
 				// Each row in A
-				.map(new MapFunction<Tuple2<Integer,Integer[]>, Tuple2<Integer,Integer[]>>() {
+				.map(new MapFunction<int[], Integer[]>() {
 					@Override
-					public Tuple2<Integer,Integer[]> map(Tuple2<Integer,Integer[]> A_row) throws Exception {
-						Integer[] vector = new Integer[A_row.f1.length];
+					public Integer[] map(int[] A_row) throws Exception {
+						Integer[] vector = new Integer[N];
 
-						for (int j = 0; j < B.length; j++) {
+						for (int j = 0; j < N; j++) {
 							Integer sum = 0;
-							for (int k = 0; k < B[j].f1.length; k++) {
-								sum += A_row.f1[k] * B[k].f1[j];
+							for (int k = 0; k < N; k++) {
+								sum += A_row[k] * B[k][j];
 							}
 							vector[j] = sum;
 						}
 
-						return new Tuple2<>(A_row.f0, vector);
+						return vector;
 					}
 				});
 
 		// Convert to string
 		DataStream<String> result = arr
-				.map(new MapFunction<Tuple2<Integer, Integer[]>, String>() {
+				.map(new MapFunction<Integer[], String>() {
 					@Override
-					public String map(Tuple2<Integer, Integer[]> row) throws Exception {
+					public String map(Integer[] vector) throws Exception {
 
-						Integer[] vector = row.f1;
-
-						StringBuilder res = new StringBuilder(row.f0 + ",");
+						StringBuilder res = new StringBuilder();
 						for (Integer val : vector) {
 							res.append(val).append(" ");
 						}
@@ -126,7 +136,7 @@ public class StreamingJob {
 								.build())
 				.build();
 
-		result.addSink(sink);
+		result.addSink(sink).setParallelism(1);
 
 		// execute program
 		env.execute("Matrix Multiply");

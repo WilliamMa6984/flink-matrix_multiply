@@ -6,7 +6,7 @@ import java.io.IOException;
 import java.util.Random;
 
 public class WriteInputFile {
-    public static int N = 50;
+    public static int N = 1000;
     public static Random rng = new Random(42);
 
     public static void main(String[] args) throws Exception {
@@ -23,7 +23,7 @@ public class WriteInputFile {
         /**
          * Matrix A
          */
-        File file = new File("src/main/java/package2/MatrixA.java");
+        File file = new File("Data/MatrixA.txt");
 
         FileWriter myWriter = new FileWriter(file, false);
 
@@ -32,7 +32,7 @@ public class WriteInputFile {
         /**
          * Matrix B
          */
-        File fileB = new File("src/main/java/package2/MatrixB.java");
+        File fileB = new File("Data/MatrixB.txt");
 
         FileWriter myWriterB = new FileWriter(fileB, false);
 
@@ -40,6 +40,23 @@ public class WriteInputFile {
 
     }
 
+    private static void WriteMatrix(FileWriter myWriter, int[][] matrix, String name) throws IOException {
+        StringBuilder out = new StringBuilder();
+
+        for (int i = 0; i < matrix.length; i++) {
+            out.append(i).append(","); // Index
+
+            for (int Aj : matrix[i]) {
+                out.append(Aj).append(" ");
+            }
+            out.deleteCharAt(out.length() - 1).append("\n");
+        }
+
+        myWriter.write(out.toString());
+        myWriter.close();
+    }
+
+    /*
     private static void WriteMatrix(FileWriter myWriter, int[][] matrix, String name) throws IOException {
         StringBuilder out = new StringBuilder();
 
@@ -62,4 +79,5 @@ public class WriteInputFile {
         myWriter.write(out.toString());
         myWriter.close();
     }
+     */
 }
