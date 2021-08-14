@@ -28,17 +28,19 @@ public class SequentialJob {
             }
         }
 
+        FileWriter writer = new FileWriter("Data/written.txt", false);
+
         StringBuilder res = new StringBuilder();
         for (int[] row : C) {
-
-            res = new StringBuilder(row + ",");
             for (Integer val : row) {
                 res.append(val).append(" ");
             }
-            res.deleteCharAt(res.length() - 1); // Remove last " "
+            res.deleteCharAt(res.length() - 1).append("\n"); // Remove last " "
         }
 
-        FileWriter writer = new FileWriter("Data/written.txt", false);
+        System.out.println(res.toString());
+
         writer.write(res.toString());
+        writer.close();
     }
 }

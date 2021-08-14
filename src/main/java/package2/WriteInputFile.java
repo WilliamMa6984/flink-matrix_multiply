@@ -6,7 +6,7 @@ import java.io.IOException;
 import java.util.Random;
 
 public class WriteInputFile {
-    public static int N = 10;
+    public static int N = 50;
     public static Random rng = new Random(42);
 
     public static void main(String[] args) throws Exception {

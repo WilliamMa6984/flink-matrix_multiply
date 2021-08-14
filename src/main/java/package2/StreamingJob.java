@@ -71,7 +71,7 @@ public class StreamingJob {
 		//DataStream<Tuple2<Integer,Integer[]>> A = env.fromElements(Matrices.A);
 		//Integer[][] B = Matrices.B;
 
-		DataStream<Tuple2<Integer,Integer[]>> A = env.fromElements(MatrixB.matrix); // Stream of read data
+		DataStream<Tuple2<Integer,Integer[]>> A = env.fromElements(MatrixA.matrix); // Stream of read data
 
 		Tuple2<Integer,Integer[]>[] B = MatrixB.matrix; // Pre computed data
 
