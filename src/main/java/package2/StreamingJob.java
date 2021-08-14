@@ -19,10 +19,15 @@
 package package2;
 
 import org.apache.flink.api.common.functions.MapFunction;
-import org.apache.flink.api.common.functions.RichMapFunction;
+import org.apache.flink.api.common.serialization.SimpleStringEncoder;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.sink.filesystem.StreamingFileSink;
+import org.apache.flink.streaming.api.functions.sink.filesystem.rollingpolicies.DefaultRollingPolicy;
+
+import java.util.concurrent.TimeUnit;
 
 /**
  * Skeleton for a Flink Streaming Job.
@@ -61,34 +66,67 @@ public class StreamingJob {
 		 * https://flink.apache.org/docs/latest/apis/streaming/index.html
 		 *
 		 */
-		DataStream<Tuple2<Integer,Integer[]>> A = env.fromElements(Matrices.A);
-		Integer[][] B = Matrices.B;
 
-		DataStream<Tuple2<Integer,String>> result = A
+		// Filter input
+		//DataStream<Tuple2<Integer,Integer[]>> A = env.fromElements(Matrices.A);
+		//Integer[][] B = Matrices.B;
+
+		DataStream<Tuple2<Integer,Integer[]>> A = env.fromElements(MatrixB.matrix); // Stream of read data
+
+		Tuple2<Integer,Integer[]>[] B = MatrixB.matrix; // Pre computed data
+
+		DataStream<Tuple2<Integer,Integer[]>> arr = A
 				.keyBy(value -> value.f0)
 				// Each row in A
-				.map(new MapFunction<Tuple2<Integer,Integer[]>, Tuple2<Integer,String>>() {
+				.map(new MapFunction<Tuple2<Integer,Integer[]>, Tuple2<Integer,Integer[]>>() {
 					@Override
-					public Tuple2<Integer,String> map(Tuple2<Integer,Integer[]> A_row) throws Exception {
+					public Tuple2<Integer,Integer[]> map(Tuple2<Integer,Integer[]> A_row) throws Exception {
 						Integer[] vector = new Integer[A_row.f1.length];
 
 						for (int j = 0; j < B.length; j++) {
 							Integer sum = 0;
-							for (int k = 0; k < B[j].length; k++) {
-								sum += A_row.f1[k] * B[k][j];
+							for (int k = 0; k < B[j].f1.length; k++) {
+								sum += A_row.f1[k] * B[k].f1[j];
 							}
 							vector[j] = sum;
 						}
 
-						String res = "";
-						for (Integer val : vector) {
-							res += val + " ";
-						}
-						return new Tuple2<>(A_row.f0, res);
+						return new Tuple2<>(A_row.f0, vector);
 					}
 				});
 
-		result.print();
+		// Convert to string
+		DataStream<String> result = arr
+				.map(new MapFunction<Tuple2<Integer, Integer[]>, String>() {
+					@Override
+					public String map(Tuple2<Integer, Integer[]> row) throws Exception {
+
+						Integer[] vector = row.f1;
+
+						StringBuilder res = new StringBuilder(row.f0 + ",");
+						for (Integer val : vector) {
+							res.append(val).append(" ");
+						}
+						res.deleteCharAt(res.length() - 1); // Remove last " "
+
+						return res.toString();
+					}
+				});
+
+		// Write output to file
+		final String outputPath = "Data/out";
+		// https://ci.apache.org/projects/flink/flink-docs-release-1.13/docs/connectors/datastream/streamfile_sink/
+		final StreamingFileSink<String> sink = StreamingFileSink
+				.forRowFormat(new Path(outputPath), new SimpleStringEncoder<String>("UTF-8"))
+				.withRollingPolicy(
+						DefaultRollingPolicy.builder()
+								.withRolloverInterval(TimeUnit.MINUTES.toMillis(15))
+								.withInactivityInterval(TimeUnit.MINUTES.toMillis(5))
+								.withMaxPartSize(1024 * 1024 * 1024)
+								.build())
+				.build();
+
+		result.addSink(sink);
 
 		// execute program
 		env.execute("Matrix Multiply");
