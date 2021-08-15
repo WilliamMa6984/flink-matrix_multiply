@@ -20,6 +20,7 @@ package package2;
 
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.serialization.SimpleStringEncoder;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -42,18 +43,23 @@ import java.util.concurrent.TimeUnit;
  * method, change the respective entry in the POM.xml file (simply search for 'mainClass').
  */
 public class StreamingJob {
-	public static int N = 2000;
+	public static int N = 10;
 	public static Random rng = new Random(42);
 
 	public static void main(String[] args) throws Exception {
-		int[][] A = new int[N][N];
-		int[][] B = new int[N][N];
+		String[] A = new String[N];
+		int[][] B = new int[N][N]; // Pre compiled data
 
 		for (int i = 0; i < N; i++) {
+			StringBuilder AStr = new StringBuilder();
+			AStr.append(i).append(","); // Add index of row for key
 			for (int j = 0; j < N; j++) {
-				A[i][j] = rng.nextInt();
+				AStr.append(rng.nextInt()).append(" ");
 				B[i][j] = rng.nextInt();
 			}
+			AStr.deleteCharAt(AStr.length() - 1);
+
+			A[i] = AStr.toString();
 		}
 
 		// set up the streaming execution environment
@@ -86,35 +92,46 @@ public class StreamingJob {
 		//DataStream<Tuple2<Integer,Integer[]>> A = env.fromElements(MatrixA.matrix); // Stream of read data
 		//Tuple2<Integer,Integer[]>[] B = MatrixB.matrix; // Pre computed data
 
-		DataStream<int[]> A_str = env.fromElements(A); // Stream of read data
+		DataStream<String> A_str = env.fromElements(A); // Stream of read data
 
-		DataStream<Integer[]> arr = A_str
+		DataStream<Tuple2<Integer, Integer[]>> arr = A_str
 				// Each row in A
-				.map(new MapFunction<int[], Integer[]>() {
+				.map(new MapFunction<String, Tuple2<Integer, Integer[]>>() {
 					@Override
-					public Integer[] map(int[] A_row) throws Exception {
+					public Tuple2<Integer, Integer[]> map(String input) throws Exception {
+						String[] row = input.split(","); // Separate index and vector values
+
+						Integer[] vectorRaw = new Integer[N];
+						String[] vectorStr = row[1].split(" ");
+						for (int j = 0; j < N; j++) {
+							vectorRaw[j] = Integer.parseInt(vectorStr[j]);
+						}
+
 						Integer[] vector = new Integer[N];
 
 						for (int j = 0; j < N; j++) {
-							Integer sum = 0;
+							int sum = 0;
 							for (int k = 0; k < N; k++) {
-								sum += A_row[k] * B[k][j];
+								sum += vectorRaw[k] * B[k][j];
 							}
 							vector[j] = sum;
 						}
 
-						return vector;
+						return new Tuple2<>(Integer.parseInt(row[0]), vector);
 					}
 				});
 
 		// Convert to string
 		DataStream<String> result = arr
-				.map(new MapFunction<Integer[], String>() {
+				.map(new MapFunction<Tuple2<Integer, Integer[]>, String>() {
 					@Override
-					public String map(Integer[] vector) throws Exception {
-
+					public String map(Tuple2<Integer, Integer[]> vector) throws Exception {
 						StringBuilder res = new StringBuilder();
-						for (Integer val : vector) {
+
+						// Row number of resulting matrix
+						res.append(vector.f0).append(",");
+
+						for (Integer val : vector.f1) {
 							res.append(val).append(" ");
 						}
 						res.deleteCharAt(res.length() - 1); // Remove last " "
