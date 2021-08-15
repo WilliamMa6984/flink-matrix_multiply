@@ -22,7 +22,16 @@ import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.common.functions.ReduceFunction;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.sink.SinkFunction;
+import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
+import org.apache.flink.streaming.api.functions.windowing.WindowFunction;
+import org.apache.flink.streaming.api.windowing.assigners.SlidingProcessingTimeWindows;
+import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
+import org.apache.flink.streaming.api.windowing.assigners.TumblingProcessingTimeWindows;
+import org.apache.flink.streaming.api.windowing.time.Time;
+import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.util.Collector;
 
 /**
@@ -64,18 +73,39 @@ public class WordCount {
          * https://flink.apache.org/docs/latest/apis/streaming/index.html
          *
          */
+
         DataStream<String> text = env.readTextFile(inputPath);
 
         DataStream<Tuple2<String, Integer>> counts =
                 // Split up lines in pairs/tuples (word,1)
                 text.flatMap(new Tokenizer())
                         .keyBy(value -> value.f0)
-                        // Group and sum the words together
-                        .sum(1);
+                        .countWindow(100000L, 1000)
+                        //.window(SlidingProcessingTimeWindows.of(Time.milliseconds(2500), Time.milliseconds(500)))
+                        .reduce(new SummingReducer());
         counts.print();
 
         // execute program
         env.execute("Word Count Parallelised");
+    }
+
+    private static class SummingReducer implements ReduceFunction<Tuple2<String, Integer>> {
+
+        @Override
+        public Tuple2<String, Integer> reduce(Tuple2<String, Integer> value1, Tuple2<String, Integer> value2) {
+            return new Tuple2<>(value1.f0, value1.f1 + value2.f1);
+        }
+    }
+
+    private static class MyWindowFunction implements WindowFunction<Tuple2<String, Integer>, String, String, TimeWindow> {
+        @Override
+        public void apply(String key, TimeWindow timeWindow, Iterable<Tuple2<String, Integer>> input, Collector<String> out) throws Exception {
+            long count = 0;
+            for (Tuple2<String, Integer> in: input) {
+                count++;
+            }
+            out.collect("Window: " + timeWindow.getEnd() + "count: " + count);
+        }
     }
 
     public static class Tokenizer implements FlatMapFunction<String, Tuple2<String, Integer>> {

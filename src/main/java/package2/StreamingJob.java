@@ -19,13 +19,19 @@
 package package2;
 
 import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.api.common.functions.ReduceFunction;
 import org.apache.flink.api.common.serialization.SimpleStringEncoder;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.filesystem.StreamingFileSink;
 import org.apache.flink.streaming.api.functions.sink.filesystem.rollingpolicies.DefaultRollingPolicy;
+import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
+import org.apache.flink.streaming.api.windowing.time.Time;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
@@ -42,86 +48,94 @@ import java.util.concurrent.TimeUnit;
  * method, change the respective entry in the POM.xml file (simply search for 'mainClass').
  */
 public class StreamingJob {
-	public static int N = 2000;
+	public static int N = 10;
 	public static Random rng = new Random(42);
 
 	public static void main(String[] args) throws Exception {
-		int[][] A = new int[N][N];
-		int[][] B = new int[N][N];
+		String[] A = new String[N];
+		int[][] B = new int[N][N]; // Pre compiled data
 
 		for (int i = 0; i < N; i++) {
+			StringBuilder AStr = new StringBuilder();
+			AStr.append(i).append(","); // Add index of row for key
 			for (int j = 0; j < N; j++) {
-				A[i][j] = rng.nextInt();
+				AStr.append(rng.nextInt()).append(" ");
 				B[i][j] = rng.nextInt();
 			}
+			AStr.deleteCharAt(AStr.length() - 1);
+
+			A[i] = AStr.toString();
 		}
 
 		// set up the streaming execution environment
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
-		/*
-		 * Here, you can start creating your execution plan for Flink.
-		 *
-		 * Start with getting some data from the environment, like
-		 * 	env.readTextFile(textPath);
-		 *
-		 * then, transform the resulting DataStream<String> using operations
-		 * like
-		 * 	.filter()
-		 * 	.flatMap()
-		 * 	.join()
-		 * 	.coGroup()
-		 *
-		 * and many more.
-		 * Have a look at the programming guide for the Java API:
-		 *
-		 * https://flink.apache.org/docs/latest/apis/streaming/index.html
-		 *
-		 */
+		DataStream<String> A_str = env.fromElements(A); // Stream of read data
 
-		// Filter input
-		//DataStream<Tuple2<Integer,Integer[]>> A = env.fromElements(Matrices.A);
-		//Integer[][] B = Matrices.B;
-
-		//DataStream<Tuple2<Integer,Integer[]>> A = env.fromElements(MatrixA.matrix); // Stream of read data
-		//Tuple2<Integer,Integer[]>[] B = MatrixB.matrix; // Pre computed data
-
-		DataStream<int[]> A_str = env.fromElements(A); // Stream of read data
-
-		DataStream<Integer[]> arr = A_str
+		DataStream<List<Tuple2<Integer, Integer[]>>> arr = A_str
 				// Each row in A
-				.map(new MapFunction<int[], Integer[]>() {
+				.map(new MapFunction<String, List<Tuple2<Integer, Integer[]>>>() {
 					@Override
-					public Integer[] map(int[] A_row) throws Exception {
+					public List<Tuple2<Integer, Integer[]>> map(String input) throws Exception {
+						String[] row = input.split(","); // Separate index and vector values
+
+						Integer[] vectorRaw = new Integer[N];
+						String[] vectorStr = row[1].split(" ");
+						for (int j = 0; j < N; j++) {
+							vectorRaw[j] = Integer.parseInt(vectorStr[j]);
+						}
+
 						Integer[] vector = new Integer[N];
 
 						for (int j = 0; j < N; j++) {
-							Integer sum = 0;
+							int sum = 0;
 							for (int k = 0; k < N; k++) {
-								sum += A_row[k] * B[k][j];
+								sum += vectorRaw[k] * B[k][j];
 							}
 							vector[j] = sum;
 						}
 
-						return vector;
+						Tuple2<Integer, Integer[]> listRow = new Tuple2<>(Integer.parseInt(row[0]), vector);
+						List<Tuple2<Integer, Integer[]>> list = new ArrayList<>(N);
+						list.add(0,listRow);
+
+						return list;
 					}
 				});
+		arr.print();
+
+		DataStream<List<Tuple2<Integer, Integer[]>>> arr1 = arr
+				.keyBy(value -> value.get(0).f0)
+				.countWindow(N)
+				.reduce(new ReduceFunction<List<Tuple2<Integer, Integer[]>>>() {
+					@Override
+					public List<Tuple2<Integer, Integer[]>> reduce(List<Tuple2<Integer, Integer[]>> reduced, List<Tuple2<Integer, Integer[]>> inVector) throws Exception {
+						reduced.add(inVector.get(0).f0, inVector.get(0));
+						return reduced;
+					}
+				});
+		arr1.print();
 
 		// Convert to string
-		DataStream<String> result = arr
-				.map(new MapFunction<Integer[], String>() {
+		DataStream<String> result = arr1
+				.map(new MapFunction<List<Tuple2<Integer, Integer[]>>, String>() {
 					@Override
-					public String map(Integer[] vector) throws Exception {
-
+					public String map(List<Tuple2<Integer, Integer[]>> vectorList) throws Exception {
 						StringBuilder res = new StringBuilder();
-						for (Integer val : vector) {
-							res.append(val).append(" ");
+
+						for (Tuple2<Integer, Integer[]> vectorTuple : vectorList) {
+							res.append(vectorTuple.f0).append(",");
+							Integer[] vector = vectorTuple.f1;
+
+							for (Integer val : vector) {
+								res.append(val).append(" ");
+							}
+							res.deleteCharAt(res.length() - 1); // Remove last " "
 						}
-						res.deleteCharAt(res.length() - 1); // Remove last " "
 
 						return res.toString();
 					}
-				});
+				}).setParallelism(1);
 
 		// Write output to file
 		final String outputPath = "Data/out";
