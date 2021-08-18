@@ -18,6 +18,7 @@
 
 package package2;
 
+import org.apache.flink.api.common.functions.AggregateFunction;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.serialization.SimpleStringEncoder;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -27,7 +28,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.filesystem.StreamingFileSink;
 import org.apache.flink.streaming.api.functions.sink.filesystem.rollingpolicies.DefaultRollingPolicy;
 
-import java.util.Random;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -43,10 +44,11 @@ import java.util.concurrent.TimeUnit;
  * method, change the respective entry in the POM.xml file (simply search for 'mainClass').
  */
 public class StreamingJob {
-	public static int N = 10;
+	public static int N = 20;
 	public static Random rng = new Random(42);
 
 	public static void main(String[] args) throws Exception {
+		long current = System.nanoTime();
 		String[] A = new String[N];
 		int[][] B = new int[N][N]; // Pre compiled data
 
@@ -61,6 +63,7 @@ public class StreamingJob {
 
 			A[i] = AStr.toString();
 		}
+		System.out.println(System.nanoTime() - current);
 
 		// set up the streaming execution environment
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -86,55 +89,84 @@ public class StreamingJob {
 		 */
 
 		// Filter input
-		//DataStream<Tuple2<Integer,Integer[]>> A = env.fromElements(Matrices.A);
-		//Integer[][] B = Matrices.B;
-
-		//DataStream<Tuple2<Integer,Integer[]>> A = env.fromElements(MatrixA.matrix); // Stream of read data
-		//Tuple2<Integer,Integer[]>[] B = MatrixB.matrix; // Pre computed data
-
 		DataStream<String> A_str = env.fromElements(A); // Stream of read data
 
-		DataStream<Tuple2<Integer, Integer[]>> arr = A_str
+		DataStream<Integer[][]> arr = A_str
 				// Each row in A
 				.map(new MapFunction<String, Tuple2<Integer, Integer[]>>() {
 					@Override
 					public Tuple2<Integer, Integer[]> map(String input) throws Exception {
+						// String to integer array
 						String[] row = input.split(","); // Separate index and vector values
 
-						Integer[] vectorRaw = new Integer[N];
-						String[] vectorStr = row[1].split(" ");
+						Integer[] A_row = new Integer[N];
+						String[] A_row_str = row[1].split(" ");
 						for (int j = 0; j < N; j++) {
-							vectorRaw[j] = Integer.parseInt(vectorStr[j]);
+							A_row[j] = Integer.parseInt(A_row_str[j]);
 						}
 
-						Integer[] vector = new Integer[N];
+						Integer[] C_row = new Integer[N];
 
+						// Matrix multiplcation
 						for (int j = 0; j < N; j++) {
 							int sum = 0;
 							for (int k = 0; k < N; k++) {
-								sum += vectorRaw[k] * B[k][j];
+								sum += A_row[k] * B[k][j];
 							}
-							vector[j] = sum;
+							C_row[j] = sum;
 						}
 
-						return new Tuple2<>(Integer.parseInt(row[0]), vector);
+						return new Tuple2<>(Integer.parseInt(row[0]), C_row);
+					}
+				})
+				.keyBy(value -> value.f0)
+				.countWindowAll(N)
+				.aggregate(new AggregateFunction<Tuple2<Integer, Integer[]>, SortAccumulator, Integer[][]>() {
+					@Override
+					public SortAccumulator createAccumulator() {
+						return new SortAccumulator();
+					}
+
+					@Override
+					public SortAccumulator add(Tuple2<Integer, Integer[]> input, SortAccumulator acc) {
+						acc.matrix.put(input.f0, input.f1);
+						return acc;
+					}
+
+					@Override
+					public Integer[][] getResult(SortAccumulator acc) {
+						Set<Integer> keySet = acc.matrix.keySet();
+
+						Integer[][] sorted_matrix = new Integer[N][N];
+						for (Integer key : keySet) {
+							sorted_matrix[key] = acc.matrix.get(key);
+						}
+
+						return sorted_matrix;
+					}
+
+					@Override
+					public SortAccumulator merge(SortAccumulator a, SortAccumulator b) {
+						a.matrix.putAll(b.matrix);
+						return a;
 					}
 				});
 
 		// Convert to string
 		DataStream<String> result = arr
-				.map(new MapFunction<Tuple2<Integer, Integer[]>, String>() {
+				.map(new MapFunction<Integer[][], String>() {
 					@Override
-					public String map(Tuple2<Integer, Integer[]> vector) throws Exception {
+					public String map(Integer[][] C) throws Exception {
 						StringBuilder res = new StringBuilder();
 
 						// Row number of resulting matrix
-						res.append(vector.f0).append(",");
-
-						for (Integer val : vector.f1) {
-							res.append(val).append(" ");
+						for (int i = 0; i < N; i++) {
+							for (int j = 0; j < N; j++) {
+								res.append(C[i][j]).append(" ");
+							}
+							res.deleteCharAt(res.length() - 1); // Remove last " "
+							res.append("\n");
 						}
-						res.deleteCharAt(res.length() - 1); // Remove last " "
 
 						return res.toString();
 					}
@@ -157,5 +189,9 @@ public class StreamingJob {
 
 		// execute program
 		env.execute("Matrix Multiply");
+	}
+
+	public static class SortAccumulator {
+		HashMap<Integer, Integer[]> matrix = new HashMap<Integer, Integer[]>();
 	}
 }
